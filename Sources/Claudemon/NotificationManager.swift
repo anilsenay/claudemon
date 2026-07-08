@@ -121,8 +121,12 @@ final class NotificationManager: ObservableObject {
 
         for metric in report.metrics {
             let key = metric.kind.rawValue
-            let signature = Self.signature(for: metric)
             let prior = firedState[key]
+            // Robust, jitter- and parse-miss-tolerant window id. A brittle
+            // signature here re-arms every threshold each poll and floods the
+            // user with duplicate banners; see UsageAlertPolicy.windowSignature.
+            let signature = UsageAlertPolicy.windowSignature(
+                resetDate: metric.resetDate, prior: prior?.signature)
 
             let decision = UsageAlertPolicy.decide(
                 percentUsed: metric.percent,
@@ -139,15 +143,6 @@ final class NotificationManager: ObservableObject {
         }
 
         persistFiredState()
-    }
-
-    /// A stable identifier for the current quota window. The reset date is the
-    /// most reliable signal; when it advances we know a new window began.
-    private static func signature(for metric: UsageMetric) -> String {
-        if let date = metric.resetDate {
-            return String(Int(date.timeIntervalSince1970))
-        }
-        return "none"
     }
 
     private func persistFiredState() {

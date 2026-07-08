@@ -66,4 +66,31 @@ public enum UsageAlertPolicy {
         let mostSevere = newlyCrossed.min(by: { $0.rawValue < $1.rawValue })
         return Decision(fire: mostSevere, signature: windowSignature, fired: fired)
     }
+
+    /// Derives the de-dup window signature from a metric's reset date.
+    ///
+    /// The signature is the ONLY thing that re-arms fired thresholds: when it
+    /// changes, `decide` clears the fired set and every enabled threshold can
+    /// notify again. So any churn in the signature floods the user with
+    /// duplicate banners (observed in the wild). A raw
+    /// `timeIntervalSince1970` is far too brittle for that job — it flips on
+    /// two independent, common inputs. This helper hardens it with two rules:
+    ///
+    ///   1. **Bucket to the hour.** The CLI's reported reset time can jitter by
+    ///      a minute across polls (e.g. "9:59am" ↔ "10am"); rounding to the
+    ///      nearest hour absorbs that while still distinguishing the distinct
+    ///      5-hour session windows (which sit whole hours apart) and the
+    ///      week-apart weekly windows.
+    ///   2. **Inherit on a transient parse-miss.** When `resetDate` is nil
+    ///      (a single poll that failed to parse the reset clause) we keep the
+    ///      prior signature instead of minting a fresh "unknown" window, so one
+    ///      unparseable poll can't re-arm — and re-fire — every threshold.
+    ///
+    /// A genuinely new quota window still moves the reset by hours/days, so it
+    /// produces a new bucket and correctly re-arms exactly once.
+    public static func windowSignature(resetDate: Date?, prior: String?) -> String {
+        guard let resetDate else { return prior ?? "none" }
+        let hourBucket = Int((resetDate.timeIntervalSince1970 / 3600).rounded())
+        return "h\(hourBucket)"
+    }
 }
